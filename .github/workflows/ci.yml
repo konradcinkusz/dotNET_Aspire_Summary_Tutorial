@@ -1,0 +1,45 @@
+name: Build & Release PDF
+
+on:
+  push:
+    tags:
+      - 'v*'            # build on version tags (e.g. v1.0.0)
+
+permissions:
+  contents: write        # needed for the automated GitHub Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Compile LaTeX (minted needs --shell-escape)
+      - uses: xu-cheng/latex-action@v4
+        with:
+          root_file: aspire-notes.tex
+          latexmk_use_xelatex: true
+          latexmk_shell_escape: true
+
+      # Give the PDF a friendly release name
+      - name: Rename PDF
+        run: mv aspire-notes.pdf DotNetAspire_StudyNotes.pdf
+
+      # Store as build artefact for the next job
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DotNetAspire_PDF
+          path: DotNetAspire_StudyNotes.pdf
+
+  release:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: DotNetAspire_PDF
+
+      # Draft / update GitHub Release with the fresh PDF attached
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: DotNetAspire_StudyNotes.pdf

@@ -1,0 +1,530 @@
+\documentclass[table]{article}
+% ---- Packages & Styling ----
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{xcolor}
+\definecolor{pblue}{HTML}{2361FF}
+\definecolor{pgreen}{HTML}{009966}
+\definecolor{pred}{HTML}{E63946}
+\definecolor{codebg}{HTML}{F5F5F5}
+\usepackage{booktabs}
+\usepackage{fontawesome5}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=pblue,urlcolor=pblue}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{titlesec}
+\usepackage{minted}
+% ----- Minted global style ----
+\setminted{
+  bgcolor=codebg,
+  frame=single,
+  framesep=4pt,
+  baselinestretch=1,
+  rulecolor=\color{pblue!50},
+  fontsize=\small,
+  linenos
+}
+\titleformat{\section}{\normalfont\Large\bfseries\color{pblue}}{}{0pt}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{pblue}}{}{0pt}{}
+% ---- Icon shortcuts ----
+\newcommand{\yes}{\textcolor{pgreen}{\faCheckCircle}}
+\newcommand{\no}{\textcolor{pred}{\faTimesCircle}}
+\newcommand{\ext}{\textcolor{pblue}{\faExternalLinkAlt}}
+% ---- Document ----
+\begin{document}
+\begin{center}
+  {\LARGE\color{pblue}\faCubes\enspace .NET Aspire – Study Notes + Tutorial}\\[2pt]
+  {\footnotesize Updated: \today}
+\end{center}
+\vspace{1em}
+
+% -------------------------------------------------
+\section*{1. \faLightbulb\enspace What is .NET Aspire?}
+.NET Aspire is an opinionated, cloud‑native development toolkit introduced by Microsoft at Build 2024.  
+Its primary goal is to streamline the creation of distributed .NET applications by providing a single orchestration project (\texttt{AppHost}) that coordinates local services, dependency containers, and observability features.  Unlike generic container‑first approaches, Aspire focuses on a consistent developer experience and prescriptive defaults for telemetry, health checks and resiliency.
+
+\begin{itemize}
+  \item \textbf{Design pillars (supplementary)}: consistency, minimal manual wiring, first‑class observability.
+\end{itemize}
+
+% -------------------------------------------------
+\section*{2. \faLaptopCode\enspace Local Development Workflow}
+During development, you normally run a single command:
+\begin{minted}[fontsize=\small]{bash}
+dotnet run --project MyApp.AppHost
+\end{minted}
+\noindent Aspire compiles and launches every microservice, starts required dependency containers, injects configuration values, and exposes a dashboard (default \url{http://localhost:18888}).  The workflow emphasises short feedback cycles and traceability.
+
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}X@{}}
+\toprule
+Action & Result \\\midrule
+Run AppHost & Services and containers start in dependency order; dashboard opens automatically.\\
+Modify source code & Hot‑reload restarts only the changed service, keeping the rest of the system alive.\\
+Observe traffic & OpenTelemetry traces, logs and metrics appear in real time within the dashboard.\\
+\bottomrule
+\end{tabularx}
+
+% -------------------------------------------------
+\section*{3. \faToolbox\enspace Built‑in Service Helpers}
+Aspire ships convenience methods that abstract common runtime dependencies.  Each helper pulls a container image, sets sensible defaults, and exposes a typed connection string to dependent projects.
+
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Helper & Purpose (supplementary) \\\midrule
+\verb|AddRedis("cache")| & \faBolt\enspace In‑memory cache and pub/sub.\\
+\verb|AddPostgres("db")| & \faDatabase\enspace Relational database (PostgreSQL).\\
+\verb|AddSqlServer("db")| & \faDatabase\enspace SQL Server for local development.\\
+\verb|AddMongoDB("mongo")| & \faLeaf\enspace Document store.\\
+\verb|AddRabbitMQ("mq")| & \faPaperPlane\enspace AMQP message broker.\\
+\verb|AddJaeger| / \verb|AddZipkin| & \faBinoculars\enspace Distributed tracing back‑ends.\\
+\bottomrule
+\end{tabularx}
+
+\begin{minted}[fontsize=\small,linenos]{csharp}
+var redis = builder.AddRedis("cache");
+var db    = builder.AddPostgres("db").AddDatabase("mydata");
+
+builder.AddProject<Projects.Api>("api")
+       .WithReference(redis)
+       .WithReference(db);
+\end{minted}
+
+% -------------------------------------------------
+\section*{4. \faProjectDiagram\enspace Orchestration Scope (Core Focus)}
+Aspire intentionally limits orchestration to elements that benefit local development or automated testing.  External or platform‑managed resources remain outside \texttt{AppHost} and are referenced via configuration at deploy time.
+
+\subsection*{4.1 Components included in \texttt{AppHost}}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Category & Representative examples \\\midrule
+Services owned by the team & Micro‑APIs, background workers, front‑end gateways.\\
+Localised containers & Redis, PostgreSQL, Kafka (test broker), Jaeger.\\
+Instrumentation utilities & Aspire dashboard, side‑car tracing services.\\
+\bottomrule
+\end{tabularx}
+
+\subsection*{4.2 Components excluded from \texttt{AppHost}}
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Category & Rationale \\\midrule
+Managed PaaS (Azure SQL, S3, Blob Storage) & Provisioned by cloud provider; only endpoints required.\\
+Global infrastructure (DNS, TLS, load balancers) & Operated by central platform or DevOps team.\\
+Organisation‑wide monitoring (Grafana, Prometheus) & Aspire exports metrics; hosting lies elsewhere.\\
+Partner APIs & No local instance available.\\
+\bottomrule
+\end{tabularx}
+
+\subsection*{4.3 Decision checklist}
+\begin{tabularx}{\linewidth}{@{}l>{\centering\arraybackslash}m{1.5cm}>{\centering\arraybackslash}m{1.5cm}@{}}
+\toprule
+Question & Yes & No \\\midrule
+Is the code/container under team control? & \yes & \no \\
+Needed for local dev or CI? & \yes & \no \\
+Platform‑managed or PaaS? & \no & \yes \\
+\bottomrule
+\end{tabularx}
+
+% -------------------------------------------------
+\section*{5. \faUpload\enspace Deployment Preparation}
+When moving from local orchestration to cloud deployment, Aspire’s role transitions to configuration generation and image building.  A typical pipeline:
+
+\begin{enumerate}
+  \item Build OCI images: \verb|dotnet publish -p:PublishProfile=DefaultContainer|.
+  \item Push to registry (e.g., ACR).  
+\begin{minted}[fontsize=\small]{bash}
+az acr login --name myregistry
+docker push myregistry.azurecr.io/products-api
+\end{minted}
+  \item Map connection strings to managed services (PostgreSQL, Redis).
+  \item Deploy containers via Azure Container Apps, AKS, or Docker Compose.
+\end{enumerate}
+
+% -------------------------------------------------
+\section*{6. \faStickyNote\enspace Key Takeaways}
+.NET Aspire centres on local orchestration, providing a unified configuration surface and visible runtime topology.  By keeping cloud‑specific infrastructure outside \texttt{AppHost}, teams preserve parity between development and production while avoiding environmental drift.
+
+\begin{itemize}
+  \item Supplementary: built‑in helpers reduce boilerplate; \texttt{WithReference} automates wiring.
+\end{itemize}
+
+% -------------------------------------------------
+\section*{7. \faBook\enspace Hands-On Tutorial – Building a .NET Aspire Solution}
+% l001 ------------------------------------------------------------------------
+\noindent\textbf{Objective}. Create from scratch a small distributed system
+using .NET Aspire that consists of:
+\begin{itemize}
+  \item a public‐facing \textbf{Web API} (\texttt{Catalog.Api});
+  \item an async \textbf{Worker service} (\texttt{Notifications.Worker});
+  \item two infrastructure dependencies: \textbf{PostgreSQL} and \textbf{Redis};
+  \item single source-of-truth orchestration in \texttt{AppHost}.
+\end{itemize}
+We walk through every command, file and configuration needed until the solution
+runs locally with full telemetry.
+
+% l020 ------------------------------------------------------------------------
+\subsection*{7.1 \faTerminal\enspace Prerequisites}
+\begin{enumerate}
+  \item Install .NET 8 SDK  
+    \verb|https://aka.ms/dotnet-download|
+  \item Install the Aspire workload  
+\begin{minted}{bash}
+dotnet workload install aspire
+\end{minted}
+  \item Install Docker Desktop (WSL 2 or Hyper-V engine enabled).
+  \item (Optional) VS 2022 Preview 17.9+ or VS Code + C\# Dev Kit.
+\end{enumerate}
+
+% l040 ------------------------------------------------------------------------
+\subsection*{7.2 \faProjectDiagram\enspace Create the Solution Skeleton}
+\paragraph{Step 1 — new solution.}
+\begin{minted}{bash}
+mkdir DemoAspire && cd DemoAspire
+dotnet new sln --name DemoAspire
+\end{minted}
+
+\paragraph{Step 2 — create AppHost and shared defaults.}
+\begin{minted}{bash}
+dotnet new aspire-app -n AppHost
+dotnet sln add AppHost/AppHost.csproj
+\end{minted}
+
+\paragraph{Step 3 — add the API project.}
+\begin{minted}{bash}
+dotnet new webapi -n Catalog.Api
+dotnet sln add Catalog.Api/Catalog.Api.csproj
+\end{minted}
+
+\paragraph{Step 4 — add Worker service.}
+\begin{minted}{bash}
+dotnet new worker -n Notifications.Worker
+dotnet sln add Notifications.Worker/Notifications.Worker.csproj
+\end{minted}
+
+% l070 ------------------------------------------------------------------------
+\subsection*{7.3 \faTools\enspace Package References}
+\begin{itemize}
+  \item Each project should reference the \texttt{ServiceDefaults} library
+    generated by Aspire to inherit telemetry and health probes:
+\begin{minted}{bash}
+dotnet add Catalog.Api       reference AppHost/ServiceDefaults/ServiceDefaults.csproj
+dotnet add Notifications.Worker reference AppHost/ServiceDefaults/ServiceDefaults.csproj
+\end{minted}
+\end{itemize}
+
+% l085 ------------------------------------------------------------------------
+\subsection*{7.4 \faEdit\enspace Implement the API Endpoint}
+Edit \verb|Catalog.Api/Program.cs| to expose a minimal endpoint that stores a
+page visit counter in Redis and reads catalog items from PostgreSQL.
+
+\begin{minted}{csharp}
+var builder = WebApplication.CreateBuilder(args);
+
+// Add default Aspire goodies.
+builder.AddServiceDefaults();
+
+// Add Postgres EF Core context.
+builder.Services.AddNpgsqlDataSource(
+        builder.Configuration.GetConnectionString("db"));
+
+builder.Services.AddDbContext<CatalogContext>();
+
+// Add Redis cache.
+builder.Services.AddStackExchangeRedisCache(options =>
+{
+    options.Configuration = builder.Configuration
+          .GetConnectionString("cache");
+});
+
+var app = builder.Build();
+app.MapGet("/catalog", async (CatalogContext db, IDistributedCache cache) =>
+{
+    var count = await cache.GetStringAsync("visits") ?? "0";
+    await cache.SetStringAsync(
+        "visits", (int.Parse(count) + 1).ToString());
+
+    var items = await db.Items.ToListAsync();
+    return Results.Ok(new { visits = count, items });
+});
+
+app.Run();
+\end{minted}
+
+% l120 ------------------------------------------------------------------------
+\subsection*{7.5 \faCodeBranch\enspace Create the Worker Logic}
+Inside \verb|Notifications.Worker/Worker.cs|:
+
+\begin{minted}{csharp}
+public class Worker : BackgroundService
+{
+    private readonly ILogger<Worker> _logger;
+    private readonly IConnectionMultiplexer _redis;
+
+    public Worker(ILogger<Worker> logger,
+                  IConnectionMultiplexer redis)
+    {
+        _logger = logger;
+        _redis  = redis;
+    }
+
+    protected override async Task ExecuteAsync(
+        CancellationToken stoppingToken)
+    {
+        var sub = _redis.GetSubscriber();
+
+        await sub.SubscribeAsync("orders", (channel, msg) =>
+        {
+            _logger.LogInformation("New order received: {0}", msg);
+            // TODO: send e-mail or push notification...
+        });
+
+        while (!stoppingToken.IsCancellationRequested)
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+    }
+}
+\end{minted}
+
+Register the Redis connection in \verb|Program.cs|:
+
+\begin{minted}{csharp}
+builder.Services.AddSingleton<IConnectionMultiplexer>(
+    ConnectionMultiplexer.Connect(
+        builder.Configuration.GetConnectionString("cache")));
+\end{minted}
+
+% l170 ------------------------------------------------------------------------
+\subsection*{7.6 \faCogs\enspace Wire Everything in \texttt{AppHost}}
+Open \verb|AppHost/Program.cs| and replace the generated template:
+
+\begin{minted}{csharp}
+using Aspire.Hosting;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+// ---- Infrastructure ----------------------------------------------------
+var db    = builder.AddPostgres("db")
+                   .AddDatabase("catalog")
+                   .WithDataVolume();
+
+var cache = builder.AddRedis("cache");
+
+// ---- Application services ----------------------------------------------
+var api = builder.AddProject<Projects.Catalog_Api>("api")
+                 .WithReference(db)
+                 .WithReference(cache);
+
+var worker = builder.AddProject<Projects.Notifications_Worker>("worker")
+                    .WithReference(cache);
+
+// ---- Compose ------------------------------------------------------------
+builder.Build().Run();
+\end{minted}
+
+% l210 ------------------------------------------------------------------------
+\noindent
+Save the file and note:
+
+\begin{itemize}
+  \item \verb|AddPostgres| automatically pulls the
+    \texttt{postgres:latest} image and forwards port~5432.
+  \item The call to \verb|AddDatabase(\"catalog\")| creates a logical DB
+    visible via pgAdmin or psql.
+  \item \verb|WithReference| injects both the \verb|ConnectionStrings__db|
+    and \verb|ConnectionStrings__cache| entries into the API and Worker apps.
+\end{itemize}
+
+% l225 ------------------------------------------------------------------------
+\subsection*{7.7 \faDatabase\enspace Add EF Core Context Migration}
+\begin{enumerate}
+  \item Add EF Core packages to the API project.  
+\begin{minted}{bash}
+dotnet add Catalog.Api package Npgsql.EntityFrameworkCore.PostgreSQL
+\end{minted}
+  \item Create the model:
+\begin{minted}{csharp}
+public class Item
+{
+    public int    Id    { get; set; }
+    public string Name  { get; set; } = null!;
+    public double Price { get; set; }
+}
+public class CatalogContext : DbContext
+{
+    public CatalogContext(DbContextOptions<CatalogContext> options)
+        : base(options) {}
+    public DbSet<Item> Items => Set<Item>();
+}
+\end{minted}
+  \item Run migrations against the Aspire-managed database:  
+\begin{minted}{bash}
+dotnet ef migrations add Initial --project Catalog.Api \
+                                --startup-project AppHost
+dotnet ef database update  --project Catalog.Api \
+                                --startup-project AppHost
+\end{minted}
+\end{enumerate}
+
+% l270 ------------------------------------------------------------------------
+\subsection*{7.8 \faPlay\enspace Launch the Entire Stack}
+\begin{minted}{bash}
+dotnet run --project AppHost
+\end{minted}
+Observe:
+\begin{description}
+  \item[\faPlusCircle Containers] \texttt{postgres}, \texttt{redis}.
+  \item[\faBug Dashboard]  \url{http://localhost:18888} shows service
+        health, traces, logs and environment information.
+  \item[\faEye API Test]  \verb|http://localhost:5000/catalog| returns a
+        JSON payload with visit count and items.
+\end{description}
+
+% l295 ------------------------------------------------------------------------
+\subsection*{7.9 \faMagic\enspace Hot-Reload a New Feature}
+Add a new endpoint in the API while AppHost is still running:
+\begin{minted}{csharp}
+app.MapPost("/catalog", async (CatalogContext db, Item i) =>
+{
+    db.Items.Add(i);
+    await db.SaveChangesAsync();
+    return Results.Created($"/catalog/{i.Id}", i);
+});
+\end{minted}
+
+% \\*→ Save the file; Aspire detects the change, recompiles the API only,
+% and the new route is live without restarting Postgres, Redis or the Worker.
+
+% l320 ------------------------------------------------------------------------
+\subsection*{7.10 \faRoute\enspace Publish Images for Deployment}
+\paragraph{Multi-stage container build.}
+Add a \verb|Containerfile| to each project or rely on
+the built‐in profile:
+
+\begin{minted}{bash}
+dotnet publish Catalog.Api          -c Release -r linux-x64 \
+      /p:PublishProfile=DefaultContainer
+dotnet publish Notifications.Worker -c Release -r linux-x64 \
+      /p:PublishProfile=DefaultContainer
+\end{minted}
+
+\paragraph{Push to registry.}
+\begin{minted}{bash}
+docker tag catalog-api:latest myregistry.azurecr.io/catalog-api:v1
+docker push myregistry.azurecr.io/catalog-api:v1
+\end{minted}
+
+% l345 ------------------------------------------------------------------------
+\subsection*{7.11 \faGlobe\enspace (Optional) Deploy to Azure Container Apps}
+\begin{enumerate}
+  \item Create an environment and a Postgres flexible server with
+        Azure CLI or Terraform.
+  \item Deploy each container image:
+\begin{minted}{bash}
+az containerapp create \
+  --name catalog-api \
+  --resource-group demo-rg \
+  --environment demo-aca \
+  --image myregistry.azurecr.io/catalog-api:v1 \
+  --target-port 8080 \
+  --ingress external \
+  --env-vars ConnectionStrings__db=<cloud-pg-conn> \
+             ConnectionStrings__cache=<azure-cache-conn>
+\end{minted}
+  \item Repeat for \texttt{notifications-worker}.  
+  \item Configure autoscaling rules (CPU or queue length) as desired.
+\end{enumerate}
+
+% l370 ------------------------------------------------------------------------
+\subsection*{7.12 \faHeartbeat\enspace Health Checks}
+Aspire automatically exposes endpoints:
+\begin{itemize}
+  \item \verb|/healthz| – overall readiness
+  \item \verb|/healthy| – liveness probe
+\end{itemize}
+Kubernetes—or Container Apps—can be configured to consume these probes
+without extra code.
+
+% l385 ------------------------------------------------------------------------
+\subsection*{7.13 \faCubes\enspace Security Best-Practices (Local)}
+\begin{itemize}
+  \item Use \verb|aspire secrets| to store connection strings instead
+        of plaintext in \verb|appsettings.Development.json|.
+  \item Map certificates via Docker bind mounts for HTTPS development.
+  \item Enable Redis ACL rules in \verb|AddRedis| via
+\begin{minted}{csharp}
+.WithEnvironment("REDIS_ARGS", "--requirepass=devsecret")
+\end{minted}
+\end{itemize}
+
+% l405 ------------------------------------------------------------------------
+\subsection*{7.14 \faSync\enspace Continuous Integration Sample}
+GitHub Actions workflow snippet:
+
+\begin{minted}{yaml}
+name: ci
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+      - run: dotnet workload install aspire
+      - run: dotnet test
+      - run: dotnet publish AppHost -c Release
+\end{minted}
+
+% l435 ------------------------------------------------------------------------
+\subsection*{7.15 \faHandsHelping\enspace Troubleshooting Tips}
+\begin{description}
+  \item[\faExclamationTriangle Postgres fails to start]\hfill\\
+        Remove existing volume:  
+\verb|docker volume rm demoaspire_db_data|.
+  \item[\faExclamationTriangle “connection refused” to Redis]\hfill\\
+        Check port clash – another local Redis instance may occupy 6379.
+  \item[\faExclamationTriangle Worker not reconnecting]\hfill\\
+        Ensure \verb|IConnectionMultiplexer| is singleton and
+        \verb|ThreadPool.UnsafeQueueUserWorkItem| isn’t used inside loop.
+\end{description}
+
+% l460 ------------------------------------------------------------------------
+\subsection*{7.16 \faChartBar\enspace Extend – Add Prometheus + Grafana Locally}
+\begin{minted}{csharp}
+var prom = builder.AddContainer("prometheus", "prom/prometheus:latest")
+                  .WithBindMount("./prometheus.yml", "/etc/prometheus.yml")
+                  .WithEndpoint("http", 9090);
+
+var graf = builder.AddContainer("grafana", "grafana/grafana:latest")
+                  .WithEndpoint("http", 3000)
+                  .WithReference(prom);
+\end{minted}
+Now open \url{http://localhost:3000} (default admin/admin).
+
+% l480 ------------------------------------------------------------------------
+\subsection*{7.17 \faThumbsUp\enspace Recap}
+\begin{enumerate}
+  \item Scaffold solution with \verb|dotnet new aspire-app|.
+  \item Add projects and reference \texttt{ServiceDefaults}.
+  \item Declare infrastructure via \verb|AddPostgres|, \verb|AddRedis|.
+  \item Wire services with \verb|WithReference|.
+  \item Launch – observe dashboard, logs, traces, health.
+  \item Publish and push containers.
+  \item Deploy to chosen runtime (K8s, ACA, ECS, etc.).
+\end{enumerate}
+
+% l500 ------------------------------------------------------------------------
+\begin{center}
+\Large\bfseries\color{pgreen}
+\faCheckCircle\enspace Tutorial completed —
+run \texttt{dotnet run --project AppHost} and watch the magic!
+\end{center}
+% l510 ------------------------------------------------------------------------
+
+\end{document}

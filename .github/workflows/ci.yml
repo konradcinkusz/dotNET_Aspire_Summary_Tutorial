@@ -23,7 +23,7 @@ jobs:
 
       # Give the PDF a friendly release name
       - name: Rename PDF
-        run: mv aspire-notes.pdf DotNetAspire_StudyNotes.pdf
+        run: mv main.pdf DotNetAspire_StudyNotes.pdf
 
       # Store as build artefact for the next job
       - uses: actions/upload-artifact@v4
